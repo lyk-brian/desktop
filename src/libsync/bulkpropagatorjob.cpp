@@ -63,13 +63,17 @@ bool fileIsStillChanging(const OCC::SyncFileItem &item)
 inline QByteArray getEtagFromJsonReply(const QJsonObject &reply)
 {
     QByteArray ocEtag = OCC::parseEtag(reply.value("OC-ETag").toString().toLatin1());
-    QByteArray etag = OCC::parseEtag(reply.value("ETag").toString().toLatin1());
+    QByteArray ETag = OCC::parseEtag(reply.value("ETag").toString().toLatin1());
+    QByteArray etag = OCC::parseEtag(reply.value("etag").toString().toLatin1());
     QByteArray ret = ocEtag;
+    if (ret.isEmpty()) {
+        ret = ETag;
+    }
     if (ret.isEmpty()) {
         ret = etag;
     }
-    if (ocEtag.length() > 0 && ocEtag != etag) {
-        qCDebug(OCC::lcBulkPropagatorJob) << "Quite peculiar, we have an etag != OC-Etag [no problem!]" << etag << ocEtag;
+    if (ocEtag.length() > 0 && ocEtag != etag && ocEtag != ETag) {
+        qCDebug(OCC::lcBulkPropagatorJob) << "Quite peculiar, we have an etag != OC-Etag [no problem!]" << etag << ETag << ocEtag;
     }
     return ret;
 }
@@ -386,42 +390,34 @@ void BulkPropagatorJob::slotOnErrorStartFolderUnlock(SyncFileItemPtr item,
 
 void BulkPropagatorJob::slotPutFinished()
 {
-    for(auto &oneFile : _uploadFileParameters) {
-        qCInfo(lcBulkPropagatorJob()) << oneFile._item->_file;
-        auto *job = qobject_cast<PutMultiFileJob *>(sender());
-        ASSERT(job)
+    auto *job = qobject_cast<PutMultiFileJob *>(sender());
+    Q_ASSERT(job);
 
+    slotJobDestroyed(job); // remove it from the _jobs list
+
+    auto replyData = QByteArray{};
+    while(job->reply()->bytesAvailable()) {
+        replyData += job->reply()->readAll();
+    }
+
+    const auto replyJson = QJsonDocument::fromJson(replyData);
+    const auto fullReplyObject = replyJson.object();
+
+    for (auto &oneFile : _uploadFileParameters) {
+        qCDebug(lcBulkPropagatorJob()) << oneFile._item->_file;
         bool finished = false;
-
-        slotJobDestroyed(job); // remove it from the _jobs list
 
         oneFile._item->_httpErrorCode = static_cast<quint16>(job->reply()->attribute(QNetworkRequest::HttpStatusCodeAttribute).toUInt());
         oneFile._item->_responseTimeStamp = job->responseTimestamp();
         oneFile._item->_requestId = job->requestId();
-        QNetworkReply::NetworkError err = job->reply()->error();
+        const QNetworkReply::NetworkError err = job->reply()->error();
         if (err != QNetworkReply::NoError) {
             commonErrorHandling(oneFile._item, oneFile._fileToUpload, job);
             return;
         }
 
-        auto replyData = QByteArray{};
-        while(job->reply()->bytesAvailable()) {
-            replyData += job->reply()->readAll();
-        }
-
-        auto replyJson = QJsonDocument::fromJson(replyData);
-        auto replyArray = replyJson.array();
-        auto fileReply = QJsonObject{};
-        for (const auto &oneReply : qAsConst(replyArray)) {
-            auto replyObject = oneReply.toObject();
-            qCDebug(lcBulkPropagatorJob()) << "searching for reply" << replyObject << oneFile._item->_file;
-            if (replyObject.value("X-File-Path").toString() == oneFile._item->_file) {
-                fileReply = replyObject;
-                break;
-            }
-        }
-
-        qCInfo(lcBulkPropagatorJob()) << "file headers" << fileReply;
+        const auto fileReply = fullReplyObject.value(QChar('/') + oneFile._item->_file).toObject();
+        qCDebug(lcBulkPropagatorJob()) << "file headers" << fileReply;
 
         // The server needs some time to process the request and provide us with a poll URL
         if (oneFile._item->_httpErrorCode == 202) {
