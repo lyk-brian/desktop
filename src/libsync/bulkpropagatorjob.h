@@ -111,6 +111,8 @@ private:
 
     void finalize();
 
+    void finalizeOneFile(const UploadFileParameters &oneFile);
+
     void done(SyncFileItemPtr item,
               SyncFileItem::Status status,
               const QString &errorString);

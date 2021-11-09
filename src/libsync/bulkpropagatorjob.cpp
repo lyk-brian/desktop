@@ -493,41 +493,46 @@ void BulkPropagatorJob::adjustLastJobTimeout(AbstractNetworkJob *job, qint64 fil
                         static_cast<qint64>(30 * 60 * 1000)));
 }
 
+void BulkPropagatorJob::finalizeOneFile(const UploadFileParameters &oneFile)
+{
+    // Update the quota, if known
+    auto quotaIt = propagator()->_folderQuota.find(QFileInfo(oneFile._item->_file).path());
+    if (quotaIt != propagator()->_folderQuota.end()) {
+        quotaIt.value() -= oneFile._fileToUpload._size;
+    }
+
+    // Update the database entry
+    const auto result = propagator()->updateMetadata(*oneFile._item);
+    if (!result) {
+        done(oneFile._item, SyncFileItem::FatalError, tr("Error updating metadata: %1").arg(result.error()));
+        return;
+    } else if (*result == Vfs::ConvertToPlaceholderResult::Locked) {
+        done(oneFile._item, SyncFileItem::SoftError, tr("The file %1 is currently in use").arg(oneFile._item->_file));
+        return;
+    }
+
+    // Files that were new on the remote shouldn't have online-only pin state
+    // even if their parent folder is online-only.
+    if (oneFile._item->_instruction == CSYNC_INSTRUCTION_NEW
+        || oneFile._item->_instruction == CSYNC_INSTRUCTION_TYPE_CHANGE) {
+        auto &vfs = propagator()->syncOptions()._vfs;
+        const auto pin = vfs->pinState(oneFile._item->_file);
+        if (pin && *pin == PinState::OnlineOnly && !vfs->setPinState(oneFile._item->_file, PinState::Unspecified)) {
+            qCWarning(lcBulkPropagatorJob) << "Could not set pin state of" << oneFile._item->_file << "to unspecified";
+        }
+    }
+
+    // Remove from the progress database:
+    propagator()->_journal->setUploadInfo(oneFile._item->_file, SyncJournalDb::UploadInfo());
+    propagator()->_journal->commit("upload file start");
+
+    done(oneFile._item, SyncFileItem::Success, {});
+}
+
 void BulkPropagatorJob::finalize()
 {
-    for(auto &oneFile : _uploadFileParameters) {
-        // Update the quota, if known
-        auto quotaIt = propagator()->_folderQuota.find(QFileInfo(oneFile._item->_file).path());
-        if (quotaIt != propagator()->_folderQuota.end()) {
-            quotaIt.value() -= oneFile._fileToUpload._size;
-        }
-
-        // Update the database entry
-        const auto result = propagator()->updateMetadata(*oneFile._item);
-        if (!result) {
-            done(oneFile._item, SyncFileItem::FatalError, tr("Error updating metadata: %1").arg(result.error()));
-            return;
-        } else if (*result == Vfs::ConvertToPlaceholderResult::Locked) {
-            done(oneFile._item, SyncFileItem::SoftError, tr("The file %1 is currently in use").arg(oneFile._item->_file));
-            return;
-        }
-
-        // Files that were new on the remote shouldn't have online-only pin state
-        // even if their parent folder is online-only.
-        if (oneFile._item->_instruction == CSYNC_INSTRUCTION_NEW
-            || oneFile._item->_instruction == CSYNC_INSTRUCTION_TYPE_CHANGE) {
-            auto &vfs = propagator()->syncOptions()._vfs;
-            const auto pin = vfs->pinState(oneFile._item->_file);
-            if (pin && *pin == PinState::OnlineOnly && !vfs->setPinState(oneFile._item->_file, PinState::Unspecified)) {
-                qCWarning(lcBulkPropagatorJob) << "Could not set pin state of" << oneFile._item->_file << "to unspecified";
-            }
-        }
-
-        // Remove from the progress database:
-        propagator()->_journal->setUploadInfo(oneFile._item->_file, SyncJournalDb::UploadInfo());
-        propagator()->_journal->commit("upload file start");
-
-        done(oneFile._item, SyncFileItem::Success, {});
+    for(const auto &oneFile : _uploadFileParameters) {
+        finalizeOneFile(oneFile);
     }
 
     if (_items.empty()) {
