@@ -53,12 +53,14 @@ public:
     explicit PutMultiFileJob(AccountPtr account, const QUrl &url,
                              std::vector<OneUploadFileData> devices, QObject *parent = nullptr)
         : AbstractNetworkJob(account, {}, parent)
-        , _body(QHttpMultiPart::RelatedType)
         , _devices(std::move(devices))
         , _url(url)
     {
+        _body.setContentType(QHttpMultiPart::RelatedType);
         for(auto &oneDevice : _devices) {
             oneDevice._device->setParent(this);
+            connect(this, &PutMultiFileJob::uploadProgress,
+                    oneDevice._device.get(), &UploadDevice::slotJobUploadProgress);
         }
     }
     ~PutMultiFileJob() override;

@@ -60,7 +60,7 @@ bool fileIsStillChanging(const OCC::SyncFileItem &item)
         && msSinceMod > -10000;
 }
 
-inline QByteArray getEtagFromJsonReply(const QJsonObject &reply)
+QByteArray getEtagFromJsonReply(const QJsonObject &reply)
 {
     QByteArray ocEtag = OCC::parseEtag(reply.value("OC-ETag").toString().toLatin1());
     QByteArray ETag = OCC::parseEtag(reply.value("ETag").toString().toLatin1());
@@ -78,7 +78,7 @@ inline QByteArray getEtagFromJsonReply(const QJsonObject &reply)
     return ret;
 }
 
-inline QByteArray getHeaderFromJsonReply(const QJsonObject &reply, const QByteArray &headerName)
+QByteArray getHeaderFromJsonReply(const QJsonObject &reply, const QByteArray &headerName)
 {
     return reply.value(headerName).toString().toLatin1();
 }
@@ -218,6 +218,7 @@ void BulkPropagatorJob::triggerUpload()
     auto uploadParametersData = std::vector<OneUploadFileData>{};
     uploadParametersData.reserve(_uploadFileParameters.size());
 
+    int timeout = 0;
     for(auto &oneFile : _uploadFileParameters) {
         // job takes ownership of device via a QScopedPointer. Job deletes itself when finishing
         auto device = std::make_unique<UploadDevice>(
@@ -236,6 +237,7 @@ void BulkPropagatorJob::triggerUpload()
         }
         oneFile._headers["X-File-Path"] = oneFile._remotePath.toUtf8();
         uploadParametersData.push_back({std::move(device), oneFile._headers});
+        timeout += oneFile._fileSize;
     }
 
     auto bulkUploadUrl = Utility::concatUrlPath(propagator()->account()->url(), QStringLiteral("/remote.php/dav/bulk"));
@@ -243,11 +245,8 @@ void BulkPropagatorJob::triggerUpload()
     auto job = std::make_unique<PutMultiFileJob>(propagator()->account(), bulkUploadUrl, std::move(uploadParametersData), this);
     connect(job.get(), &PutMultiFileJob::finishedSignal, this, &BulkPropagatorJob::slotPutFinished);
     connect(job.get(), &PutMultiFileJob::uploadProgress, this, &BulkPropagatorJob::slotUploadProgress);
-    for (auto &oneUpload : uploadParametersData) {
-        connect(job.get(), &PutMultiFileJob::uploadProgress, oneUpload._device.get(), &UploadDevice::slotJobUploadProgress);
-    }
     connect(job.get(), &QObject::destroyed, this, &BulkPropagatorJob::slotJobDestroyed);
-    //adjustLastJobTimeout(job.get(), oneFile._fileSize);
+    adjustLastJobTimeout(job.get(), timeout);
     auto jobCopy = job.get();
     _jobs.append(job.release());
     jobCopy->start();
@@ -827,14 +826,7 @@ void BulkPropagatorJob::handleBlackList(SyncFileItemPtr item) const
         break;
     case SyncFileItem::Success:
     case SyncFileItem::Restoration:
-        if (item->_hasBlacklistEntry) {
-            // wipe blacklist entry.
-            propagator()->_journal->wipeErrorBlacklistEntry(item->_file);
-            // remove a blacklist entry in case the file was moved.
-            if (item->_originalFile != item->_file) {
-                propagator()->_journal->wipeErrorBlacklistEntry(item->_originalFile);
-            }
-        }
+        handleBlackListRemoval(item);
         break;
     case SyncFileItem::Conflict:
     case SyncFileItem::FileIgnored:
@@ -844,6 +836,18 @@ void BulkPropagatorJob::handleBlackList(SyncFileItemPtr item) const
     case SyncFileItem::FileNameInvalid:
         // nothing
         break;
+    }
+}
+
+void BulkPropagatorJob::handleBlackListRemoval(SyncFileItemPtr item) const
+{
+    if (item->_hasBlacklistEntry) {
+        // wipe blacklist entry.
+        propagator()->_journal->wipeErrorBlacklistEntry(item->_file);
+        // remove a blacklist entry in case the file was moved.
+        if (item->_originalFile != item->_file) {
+            propagator()->_journal->wipeErrorBlacklistEntry(item->_originalFile);
+        }
     }
 }
 

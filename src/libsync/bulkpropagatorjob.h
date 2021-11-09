@@ -163,6 +163,8 @@ private:
 
     void handleBlackList(SyncFileItemPtr item) const;
 
+    void handleBlackListRemoval(SyncFileItemPtr item) const;
+
     void handleJobDoneErrors(SyncFileItemPtr item,
                              SyncFileItem::Status status);
 
