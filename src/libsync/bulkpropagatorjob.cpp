@@ -602,6 +602,7 @@ void BulkPropagatorJob::startPollJob(SyncFileItemPtr item,
 
 void BulkPropagatorJob::slotPollFinished(UploadFileInfo fileToUpload)
 {
+    Q_UNUSED(fileToUpload)
     auto *job = qobject_cast<PollJob *>(sender());
     ASSERT(job)
 
