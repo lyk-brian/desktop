@@ -388,6 +388,73 @@ void BulkPropagatorJob::slotOnErrorStartFolderUnlock(SyncFileItemPtr item,
     qCInfo(lcBulkPropagatorJob()) << status << errorString;
 }
 
+void BulkPropagatorJob::slotPollFinishedOneFile(const UploadFileParameters &oneFile,
+                                                PutMultiFileJob *job,
+                                                const QJsonObject &fullReplyObject)
+{
+    qCDebug(lcBulkPropagatorJob()) << oneFile._item->_file;
+    bool finished = false;
+
+    oneFile._item->_httpErrorCode = static_cast<quint16>(job->reply()->attribute(QNetworkRequest::HttpStatusCodeAttribute).toUInt());
+    oneFile._item->_responseTimeStamp = job->responseTimestamp();
+    oneFile._item->_requestId = job->requestId();
+    const QNetworkReply::NetworkError err = job->reply()->error();
+    if (err != QNetworkReply::NoError) {
+        commonErrorHandling(oneFile._item, oneFile._fileToUpload, job);
+        return;
+    }
+
+    const auto fileReply = fullReplyObject.value(QChar('/') + oneFile._item->_file).toObject();
+    qCDebug(lcBulkPropagatorJob()) << "file headers" << fileReply;
+
+    // The server needs some time to process the request and provide us with a poll URL
+    if (oneFile._item->_httpErrorCode == 202) {
+        QString path = QString::fromUtf8(getHeaderFromJsonReply(fileReply, "OC-JobStatus-Location"));
+        if (path.isEmpty()) {
+            done(oneFile._item, SyncFileItem::NormalError, tr("Poll URL missing"));
+            return;
+        }
+        startPollJob(oneFile._item, oneFile._fileToUpload, path);
+        return;
+    }
+
+    // Check the file again post upload.
+    // Two cases must be considered separately: If the upload is finished,
+    // the file is on the server and has a changed ETag. In that case,
+    // the etag has to be properly updated in the client journal, and because
+    // of that we can bail out here with an error. But we can reschedule a
+    // sync ASAP.
+    // But if the upload is ongoing, because not all chunks were uploaded
+    // yet, the upload can be stopped and an error can be displayed, because
+    // the server hasn't registered the new file yet.
+    QByteArray etag = getEtagFromJsonReply(fileReply);
+    finished = etag.length() > 0;
+
+    const QString fullFilePath(propagator()->fullLocalPath(oneFile._item->_file));
+
+    // Check if the file still exists
+    if (!checkFileStillExists(oneFile._item, finished, fullFilePath)) {
+        return;
+    }
+
+    // Check whether the file changed since discovery. the file check here is the original and not the temprary.
+    if (!checkFileChanged(oneFile._item, finished, fullFilePath)) {
+        return;
+    }
+
+    // the file id should only be empty for new files up- or downloaded
+    computeFileId(oneFile._item, fileReply);
+
+    oneFile._item->_etag = etag;
+
+    if (getHeaderFromJsonReply(fileReply, "X-OC-MTime") != "accepted") {
+        // X-OC-MTime is supported since owncloud 5.0.   But not when chunking.
+        // Normally Owncloud 6 always puts X-OC-MTime
+        qCWarning(lcBulkPropagatorJob) << "Server does not support X-OC-MTime" << getHeaderFromJsonReply(fileReply, "X-OC-MTime");
+        // Well, the mtime was not set
+    }
+}
+
 void BulkPropagatorJob::slotPutFinished()
 {
     auto *job = qobject_cast<PutMultiFileJob *>(sender());
@@ -404,67 +471,7 @@ void BulkPropagatorJob::slotPutFinished()
     const auto fullReplyObject = replyJson.object();
 
     for (auto &oneFile : _uploadFileParameters) {
-        qCDebug(lcBulkPropagatorJob()) << oneFile._item->_file;
-        bool finished = false;
-
-        oneFile._item->_httpErrorCode = static_cast<quint16>(job->reply()->attribute(QNetworkRequest::HttpStatusCodeAttribute).toUInt());
-        oneFile._item->_responseTimeStamp = job->responseTimestamp();
-        oneFile._item->_requestId = job->requestId();
-        const QNetworkReply::NetworkError err = job->reply()->error();
-        if (err != QNetworkReply::NoError) {
-            commonErrorHandling(oneFile._item, oneFile._fileToUpload, job);
-            return;
-        }
-
-        const auto fileReply = fullReplyObject.value(QChar('/') + oneFile._item->_file).toObject();
-        qCDebug(lcBulkPropagatorJob()) << "file headers" << fileReply;
-
-        // The server needs some time to process the request and provide us with a poll URL
-        if (oneFile._item->_httpErrorCode == 202) {
-            QString path = QString::fromUtf8(getHeaderFromJsonReply(fileReply, "OC-JobStatus-Location"));
-            if (path.isEmpty()) {
-                done(oneFile._item, SyncFileItem::NormalError, tr("Poll URL missing"));
-                return;
-            }
-            startPollJob(oneFile._item, oneFile._fileToUpload, path);
-            return;
-        }
-
-        // Check the file again post upload.
-        // Two cases must be considered separately: If the upload is finished,
-        // the file is on the server and has a changed ETag. In that case,
-        // the etag has to be properly updated in the client journal, and because
-        // of that we can bail out here with an error. But we can reschedule a
-        // sync ASAP.
-        // But if the upload is ongoing, because not all chunks were uploaded
-        // yet, the upload can be stopped and an error can be displayed, because
-        // the server hasn't registered the new file yet.
-        QByteArray etag = getEtagFromJsonReply(fileReply);
-        finished = etag.length() > 0;
-
-        const QString fullFilePath(propagator()->fullLocalPath(oneFile._item->_file));
-
-        // Check if the file still exists
-        if (!checkFileStillExists(oneFile._item, finished, fullFilePath)) {
-            return;
-        }
-
-        // Check whether the file changed since discovery. the file check here is the original and not the temprary.
-        if (!checkFileChanged(oneFile._item, finished, fullFilePath)) {
-            return;
-        }
-
-        // the file id should only be empty for new files up- or downloaded
-        computeFileId(oneFile._item, fileReply);
-
-        oneFile._item->_etag = etag;
-
-        if (getHeaderFromJsonReply(fileReply, "X-OC-MTime") != "accepted") {
-            // X-OC-MTime is supported since owncloud 5.0.   But not when chunking.
-            // Normally Owncloud 6 always puts X-OC-MTime
-            qCWarning(lcBulkPropagatorJob) << "Server does not support X-OC-MTime" << getHeaderFromJsonReply(fileReply, "X-OC-MTime");
-            // Well, the mtime was not set
-        }
+        slotPollFinishedOneFile(oneFile, job, fullReplyObject);
     }
 
     finalize();

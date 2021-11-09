@@ -30,6 +30,7 @@ namespace OCC {
 Q_DECLARE_LOGGING_CATEGORY(lcBulkPropagatorJob)
 
 class ComputeChecksum;
+class PutMultiFileJob;
 
 class BulkPropagatorJob : public PropagatorJob
 {
@@ -112,6 +113,10 @@ private:
     void finalize();
 
     void finalizeOneFile(const UploadFileParameters &oneFile);
+
+    void slotPollFinishedOneFile(const UploadFileParameters &oneFile,
+                                 OCC::PutMultiFileJob *job,
+                                 const QJsonObject &fullReplyObject);
 
     void done(SyncFileItemPtr item,
               SyncFileItem::Status status,
