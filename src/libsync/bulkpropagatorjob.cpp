@@ -542,6 +542,8 @@ void BulkPropagatorJob::finalize()
         finalizeOneFile(oneFile);
     }
 
+    _uploadFileParameters.clear();
+
     if (_items.empty()) {
         if (!_jobs.empty()) {
             // just wait for the other job to finish.
