@@ -12,8 +12,7 @@
  * for more details.
  */
 
-#ifndef BULKPROPAGATORJOB_H
-#define BULKPROPAGATORJOB_H
+#pragma once
 
 #include "owncloudpropagator.h"
 
@@ -182,5 +181,3 @@ private:
 };
 
 }
-
-#endif // BULKPROPAGATORJOB_H

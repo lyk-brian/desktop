@@ -12,8 +12,7 @@
  * for more details.
  */
 
-#ifndef PUTMULTIFILEJOB_H
-#define PUTMULTIFILEJOB_H
+#pragma once
 
 #include "abstractnetworkjob.h"
 
@@ -92,5 +91,3 @@ private:
 };
 
 }
-
-#endif // PUTMULTIFILEJOB_H
