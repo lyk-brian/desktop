@@ -15,7 +15,6 @@
 #pragma once
 
 #include "owncloudpropagator.h"
-
 #include "abstractnetworkjob.h"
 
 #include <QLoggingCategory>
@@ -60,7 +59,6 @@ class BulkPropagatorJob : public PropagatorJob
     };
 
 public:
-
     explicit BulkPropagatorJob(OwncloudPropagator *propagator,
                                const std::deque<SyncFileItemPtr> &items);
 
@@ -69,7 +67,6 @@ public:
     JobParallelism parallelism() override;
 
 private slots:
-
     void startUploadFile(SyncFileItemPtr item, UploadFileInfo fileToUpload);
 
     void slotComputeContentChecksum(SyncFileItemPtr item,
@@ -101,7 +98,6 @@ private slots:
     void slotPollFinished(UploadFileInfo fileToUpload);
 
 private:
-
     void doStartUpload(SyncFileItemPtr item,
                        UploadFileInfo fileToUpload,
                        QByteArray transmissionChecksumHeader);

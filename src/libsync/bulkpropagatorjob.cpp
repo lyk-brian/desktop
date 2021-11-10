@@ -150,7 +150,6 @@ void BulkPropagatorJob::startUploadFile(SyncFileItemPtr item, UploadFileInfo fil
         return;
     }
 
-    qCDebug(lcBulkPropagatorJob) << "Running the compute checksum";
     return slotComputeContentChecksum(item, fileToUpload);
 }
 
@@ -247,9 +246,8 @@ void BulkPropagatorJob::triggerUpload()
     connect(job.get(), &PutMultiFileJob::uploadProgress, this, &BulkPropagatorJob::slotUploadProgress);
     connect(job.get(), &QObject::destroyed, this, &BulkPropagatorJob::slotJobDestroyed);
     adjustLastJobTimeout(job.get(), timeout);
-    auto jobCopy = job.get();
-    _jobs.append(job.release());
-    jobCopy->start();
+    _jobs.append(job.get());
+    job.release()->start();
 }
 
 void BulkPropagatorJob::slotComputeContentChecksum(SyncFileItemPtr item,
@@ -339,9 +337,7 @@ void BulkPropagatorJob::slotStartUpload(SyncFileItemPtr item,
                                         const QByteArray &transmissionChecksumType,
                                         const QByteArray &transmissionChecksum)
 {
-    QByteArray transmissionChecksumHeader;
-
-    transmissionChecksumHeader = makeChecksumHeader(transmissionChecksumType, transmissionChecksum);
+    const auto transmissionChecksumHeader = makeChecksumHeader(transmissionChecksumType, transmissionChecksum);
 
     // If no checksum header was not set, reuse the transmission checksum as the content checksum.
     if (item->_checksumHeader.isEmpty()) {
@@ -361,7 +357,7 @@ void BulkPropagatorJob::slotStartUpload(SyncFileItemPtr item,
     item->_modtime = FileSystem::getModTime(originalFilePath);
     if (prevModtime != item->_modtime) {
         propagator()->_anotherSyncNeeded = true;
-        qDebug() << "prevModtime" << prevModtime << "Curr" << item->_modtime;
+        qDebug() << "trigger another sync after checking modified time of item" << item->_file << "prevModtime" << prevModtime << "Curr" << item->_modtime;
         return slotOnErrorStartFolderUnlock(item, SyncFileItem::SoftError, tr("Local file changed during syncing. It will be resumed."));
     }
 
@@ -383,8 +379,8 @@ void BulkPropagatorJob::slotOnErrorStartFolderUnlock(SyncFileItemPtr item,
                                                      SyncFileItem::Status status,
                                                      const QString &errorString)
 {
-    done(item, status, errorString);
     qCInfo(lcBulkPropagatorJob()) << status << errorString;
+    done(item, status, errorString);
 }
 
 void BulkPropagatorJob::slotPollFinishedOneFile(const UploadFileParameters &oneFile,
