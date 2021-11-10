@@ -62,6 +62,7 @@ public:
                     oneDevice._device.get(), &UploadDevice::slotJobUploadProgress);
         }
     }
+
     ~PutMultiFileJob() override;
 
     void start() override;

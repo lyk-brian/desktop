@@ -243,7 +243,14 @@ void BulkPropagatorJob::triggerUpload()
     qCInfo(lcBulkPropagatorJob()) << "going to" << bulkUploadUrl;
     auto job = std::make_unique<PutMultiFileJob>(propagator()->account(), bulkUploadUrl, std::move(uploadParametersData), this);
     connect(job.get(), &PutMultiFileJob::finishedSignal, this, &BulkPropagatorJob::slotPutFinished);
-    connect(job.get(), &PutMultiFileJob::uploadProgress, this, &BulkPropagatorJob::slotUploadProgress);
+
+    for(auto &oneFile : _uploadFileParameters) {
+        connect(job.get(), &PutMultiFileJob::uploadProgress,
+                this, [this, oneFile] (qint64 sent, qint64 total) {
+            slotUploadProgress(oneFile._item, sent, total);
+        });
+    }
+
     connect(job.get(), &QObject::destroyed, this, &BulkPropagatorJob::slotJobDestroyed);
     adjustLastJobTimeout(job.get(), timeout);
     _jobs.append(job.get());
@@ -457,11 +464,7 @@ void BulkPropagatorJob::slotPutFinished()
 
     slotJobDestroyed(job); // remove it from the _jobs list
 
-    auto replyData = QByteArray{};
-    while(job->reply()->bytesAvailable()) {
-        replyData += job->reply()->readAll();
-    }
-
+    const auto replyData = job->reply()->readAll();
     const auto replyJson = QJsonDocument::fromJson(replyData);
     const auto fullReplyObject = replyJson.object();
 
@@ -472,9 +475,16 @@ void BulkPropagatorJob::slotPutFinished()
     finalize();
 }
 
-void BulkPropagatorJob::slotUploadProgress(qint64, qint64) const
+void BulkPropagatorJob::slotUploadProgress(SyncFileItemPtr item, qint64 sent, qint64 total)
 {
-    qCInfo(lcBulkPropagatorJob()) << "slotUploadProgress";
+    // Completion is signaled with sent=0, total=0; avoid accidentally
+    // resetting progress due to the sent being zero by ignoring it.
+    // finishedSignal() is bound to be emitted soon anyway.
+    // See https://bugreports.qt.io/browse/QTBUG-44782.
+    if (sent == 0 && total == 0) {
+        return;
+    }
+    propagator()->reportProgress(*item, sent - total);
 }
 
 void BulkPropagatorJob::slotJobDestroyed(QObject *job)

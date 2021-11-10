@@ -91,7 +91,7 @@ private slots:
 
     void slotPutFinished();
 
-    void slotUploadProgress(qint64, qint64) const;
+    void slotUploadProgress(SyncFileItemPtr item, qint64 sent, qint64 total);
 
     void slotJobDestroyed(QObject *job);
 
