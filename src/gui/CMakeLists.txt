@@ -131,6 +131,7 @@ set(client_SRCS
     tray/usermodel.cpp
     tray/notificationhandler.cpp
     tray/notificationcache.cpp
+    tray/wheelhandler.cpp
     creds/credentialsfactory.cpp
     creds/httpcredentialsgui.cpp
     creds/oauth.cpp
