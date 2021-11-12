@@ -24,12 +24,9 @@ PutMultiFileJob::~PutMultiFileJob() = default;
 
 void PutMultiFileJob::start()
 {
-    qCInfo(lcPutMultiFileJob) << "Start PUT of multi file on" << path();
     QNetworkRequest req;
 
     for(auto &oneDevice : _devices) {
-        qCInfo(lcPutMultiFileJob) << "PUT of" << oneDevice._headers << oneDevice._device.get();
-
         auto onePart = QHttpPart{};
 
         onePart.setBodyDevice(oneDevice._device.get());

@@ -92,7 +92,7 @@ BulkPropagatorJob::BulkPropagatorJob(OwncloudPropagator *propagator,
     : PropagatorJob(propagator)
     , _items(items)
 {
-    _uploadFileParameters.reserve(_items.size());
+    _uploadFileParameters.reserve(100);
 }
 
 bool BulkPropagatorJob::scheduleSelfOrChild()
@@ -103,13 +103,13 @@ bool BulkPropagatorJob::scheduleSelfOrChild()
 
     {
         auto bulkUploadUrl = Utility::concatUrlPath(propagator()->account()->url(), QStringLiteral("/remote.php/dav/bulk"));
-        qCInfo(lcBulkPropagatorJob()) << "going to" << bulkUploadUrl;
     }
 
     _state = Running;
     for(int i = 0; i < 100 && !_items.empty(); ++i) {
         auto currentItem = _items.front();
         _items.pop_front();
+        _pendingChecksumFiles.insert(currentItem->_file);
         QMetaObject::invokeMethod(this, [this, currentItem] () {
             UploadFileInfo fileToUpload;
             fileToUpload._file = currentItem->_file;
@@ -196,7 +196,6 @@ void BulkPropagatorJob::doStartUpload(SyncFileItemPtr item,
 
     QString path = fileToUpload._file;
 
-    qCInfo(lcBulkPropagatorJob) << propagator()->fullRemotePath(path) << "transmission checksum" << transmissionChecksumHeader;
     currentHeaders["X-File-MD5"] = transmissionChecksumHeader;
 
     const QString fileName = fileToUpload._path;
@@ -205,9 +204,11 @@ void BulkPropagatorJob::doStartUpload(SyncFileItemPtr item,
                 propagator()->fullRemotePath(path), fileName,
                 fileSize, currentHeaders};
 
+    qCInfo(lcBulkPropagatorJob) << propagator()->fullRemotePath(path) << "transmission checksum" << transmissionChecksumHeader << fileName;
     _uploadFileParameters.push_back(std::move(newUploadFile));
+    _pendingChecksumFiles.remove(item->_file);
 
-    if (_checksumsJobs.empty()) {
+    if (_pendingChecksumFiles.empty()) {
         triggerUpload();
     }
 }
@@ -240,7 +241,6 @@ void BulkPropagatorJob::triggerUpload()
     }
 
     auto bulkUploadUrl = Utility::concatUrlPath(propagator()->account()->url(), QStringLiteral("/remote.php/dav/bulk"));
-    qCInfo(lcBulkPropagatorJob()) << "going to" << bulkUploadUrl;
     auto job = std::make_unique<PutMultiFileJob>(propagator()->account(), bulkUploadUrl, std::move(uploadParametersData), this);
     connect(job.get(), &PutMultiFileJob::finishedSignal, this, &BulkPropagatorJob::slotPutFinished);
 
@@ -251,7 +251,6 @@ void BulkPropagatorJob::triggerUpload()
         });
     }
 
-    connect(job.get(), &QObject::destroyed, this, &BulkPropagatorJob::slotJobDestroyed);
     adjustLastJobTimeout(job.get(), timeout);
     _jobs.append(job.get());
     job.release()->start();
@@ -298,13 +297,8 @@ void BulkPropagatorJob::slotComputeContentChecksum(SyncFileItemPtr item,
     });
     connect(computeChecksum.get(), &ComputeChecksum::done,
             computeChecksum.get(), &QObject::deleteLater);
-    connect(computeChecksum.get(), &QObject::destroyed, this, [this] (QObject *deletedJob) {
-        _checksumsJobs.erase(std::remove(_checksumsJobs.begin(), _checksumsJobs.end(), deletedJob), _checksumsJobs.end());
-    });
 
-    auto jobCopy = computeChecksum.get();
-    _checksumsJobs.append(computeChecksum.release());
-    jobCopy->start(fileToUpload._path);
+    computeChecksum.release()->start(fileToUpload._path);
 }
 
 void BulkPropagatorJob::slotComputeTransmissionChecksum(SyncFileItemPtr item,
@@ -407,7 +401,7 @@ void BulkPropagatorJob::slotPollFinishedOneFile(const UploadFileParameters &oneF
     }
 
     const auto fileReply = fullReplyObject.value(QChar('/') + oneFile._item->_file).toObject();
-    qCDebug(lcBulkPropagatorJob()) << "file headers" << fileReply;
+    qCDebug(lcBulkPropagatorJob()) << oneFile._item->_file << "file headers" << fileReply;
 
     // The server needs some time to process the request and provide us with a poll URL
     if (oneFile._item->_httpErrorCode == 202) {
@@ -489,7 +483,6 @@ void BulkPropagatorJob::slotUploadProgress(SyncFileItemPtr item, qint64 sent, qi
 
 void BulkPropagatorJob::slotJobDestroyed(QObject *job)
 {
-    qCInfo(lcBulkPropagatorJob()) << "slotJobDestroyed";
     _jobs.erase(std::remove(_jobs.begin(), _jobs.end(), job), _jobs.end());
 }
 
@@ -547,6 +540,7 @@ void BulkPropagatorJob::finalize()
         finalizeOneFile(oneFile);
     }
 
+    Q_ASSERT(!_uploadFileParameters.empty());
     _uploadFileParameters.clear();
 
     if (_items.empty()) {
@@ -554,7 +548,7 @@ void BulkPropagatorJob::finalize()
             // just wait for the other job to finish.
             return;
         }
-        if (!_checksumsJobs.empty()) {
+        if (!_pendingChecksumFiles.empty()) {
             // just wait for the other job to finish.
             return;
         }
@@ -563,7 +557,6 @@ void BulkPropagatorJob::finalize()
         emit finished(_finalStatus);
         propagator()->scheduleNextJob();
     } else {
-        qCInfo(lcBulkPropagatorJob) << "remaining upload tasks" << _items.size();
         scheduleSelfOrChild();
     }
 }

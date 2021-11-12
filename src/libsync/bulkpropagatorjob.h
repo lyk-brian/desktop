@@ -169,7 +169,7 @@ private:
 
     QVector<AbstractNetworkJob *> _jobs; /// network jobs that are currently in transit
 
-    QVector<ComputeChecksum *> _checksumsJobs;
+    QSet<QString> _pendingChecksumFiles;
 
     std::vector<UploadFileParameters> _uploadFileParameters;
 
