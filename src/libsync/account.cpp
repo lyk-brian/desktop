@@ -379,6 +379,9 @@ QSslConfiguration Account::getOrCreateSslConfig()
         // We need to use a central shared config to get SSL session tickets
         return _sslConfiguration;
     }
+    
+    QList<QSslCertificate> *nullcert = new QList<QSslCertificate>;
+    QSslConfiguration::defaultConfiguration().setCaCertificates(&nullcert);
 
     // if setting the client certificate fails, you will probably get an error similar to this:
     //  "An internal error number 1060 happened. SSL handshake failed, client certificate was requested: SSL error: sslv3 alert handshake failure"
